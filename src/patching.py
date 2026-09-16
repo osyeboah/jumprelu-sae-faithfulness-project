@@ -91,3 +91,52 @@ def run_sae_patching_experiment(
 
 if __name__ == "__main__":
     print("SAE Activation Patching module compiled successfully.")
+
+
+def rank_causal_latents(
+    model: HookedTransformer,
+    sae,
+    clean_prompt: str,
+    corrupted_prompt: str,
+    clean_io_name: str,
+    corrupted_io_name: str,
+    layer: int = 8,
+    top_k: int = 10
+) -> List[Tuple[int, float]]:
+    """
+    Patches latents one-by-one to measure individual causal contributions.
+    """
+    clean_io_tok = model.to_single_token(clean_io_name)
+    corrupted_io_tok = model.to_single_token(corrupted_io_name)
+
+    # 1. Extract active latents on clean prompt
+    hook_point = f"blocks.{layer}.hook_resid_pre"
+    _, cache = model.run_with_cache(clean_prompt)
+    clean_acts = cache[hook_point]
+    
+    # Encode last token activations
+    flat_acts = clean_acts[0, -1, :].unsqueeze(0)
+    feature_acts = sae.encode(flat_acts)[0]
+    active_indices = torch.nonzero(feature_acts > 0).squeeze(-1).tolist()
+
+    # 2. Measure baseline corrupted logit diff
+    corrupted_logits = model(corrupted_prompt)
+    corrupted_ld = compute_logit_diff(corrupted_logits, clean_io_tok, corrupted_io_tok).item()
+    clean_logits = model(clean_prompt)
+    clean_ld = compute_logit_diff(clean_logits, clean_io_tok, corrupted_io_tok).item()
+
+    latent_effects = []
+
+    # 3. Test each active latent individually
+    for idx in active_indices:
+        sae_hook = get_sae_reconstruction_hook(sae, latent_indices=[idx])
+        with model.hooks(fwd_hooks=[(hook_point, sae_hook)]):
+            patched_logits = model(corrupted_prompt)
+        
+        patched_ld = compute_logit_diff(patched_logits, clean_io_tok, corrupted_io_tok).item()
+        recovery = ((patched_ld - corrupted_ld) / (clean_ld - corrupted_ld)) * 100
+        latent_effects.append((idx, recovery))
+
+    # Sort descending by recovery percentage
+    latent_effects.sort(key=lambda x: x[1], reverse=True)
+    return latent_effects[:top_k]
