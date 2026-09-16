@@ -1,32 +1,39 @@
-﻿"""Main entry point for SAE fidelity vs faithfulness experiments."""
+﻿import torch
+from transformer_lens import HookedTransformer
+from sae_lens import SAE
+from src.patching import run_sae_patching_experiment
 
-import torch
-from src.models import load_model_and_sae
-from src.prompts import get_ioi_prompts
+def main():
+    print("--- Loading GPT-2 Small & Layer 8 SAE ---")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    model = HookedTransformer.from_pretrained("gpt2-small", device=device)
+    sae, _, _ = SAE.from_pretrained(
+        release="gpt2-small-res-jb", 
+        sae_id="blocks.8.hook_resid_pre", 
+        device=device
+    )
 
-def run_pipeline():
-    # 1. Load Model and Layer 8 SAE
-    model, sae, device = load_model_and_sae(layer=8)
+    print("\n--- Executing SAE Causal Interventions ---")
+    clean_prompt = "When John and Mary went to the store, John gave a book to Mary"
+    corrupted_prompt = "When John and Mary went to the store, Mary gave a book to John"
     
-    # 2. Grab Benchmark Prompt
-    prompts = get_ioi_prompts()
-    sample = prompts[0]
-    
-    print(f"\n--- Testing Prompt ---")
-    print(f"Clean: '{sample['clean']}'")
-    
-    # 3. Run model & extract Layer 8 activations
-    _, cache = model.run_with_cache(sample['clean'], names_filter="blocks.8.hook_resid_pre")
-    raw_activations = cache["blocks.8.hook_resid_pre"]
-    
-    # 4. Encode via SAE
-    feature_acts = sae.encode(raw_activations)
-    active_count = (feature_acts[0, -1, :] > 0).sum().item()
-    
-    print(f"Layer 8 Residual Vector Dim: {raw_activations.shape[-1]}")
-    print(f"SAE Latent Dimension: {sae.cfg.d_sae}")
-    print(f"Active Features on Last Token: {active_count}")
-    print("\nSetup verified successfully!")
+    results = run_sae_patching_experiment(
+        model=model,
+        sae=sae,
+        clean_prompt=clean_prompt,
+        corrupted_prompt=corrupted_prompt,
+        clean_io_name=" Mary",
+        corrupted_io_name=" John",
+        layer=8
+    )
+
+    print("\n================ EXPERIMENTAL RESULTS ================")
+    print(f"Clean Logit Difference:         {results['clean_logit_diff']:.4f}")
+    print(f"Corrupted Logit Difference:     {results['corrupted_logit_diff']:.4f}")
+    print(f"SAE-Patched Logit Difference:   {results['sae_patched_logit_diff']:.4f}")
+    print(f"Logit Diff Recovered by SAE:    {results['pct_logit_diff_recovered']:.2f}%")
+    print("=======================================================")
 
 if __name__ == "__main__":
-    run_pipeline()
+    main()
