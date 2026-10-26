@@ -1,18 +1,20 @@
-﻿"""Dataset and prompt utilities for mechanistic interpretability experiments."""
+﻿
+"""Controlled prompts for IOI next-token experiments."""
+
 
 def get_ioi_prompts():
-    """Returns clean and corrupted prompts for the Indirect Object Identification (IOI) task."""
+    """Return a matched clean and corrupted IOI prompt pair."""
     return [
         {
-            "clean": "When Kofi and Ama went to school, Kofi gave a book to",
-            "corrupted": "When John and Ama went to school, John gave a book to",
-            "correct_target": " Ama",
-            "incorrect_target": " Kofi"
-        },
-        {
-            "clean": "When Mary and John went to the store, Mary gave a drink to",
-            "corrupted": "When Alice and John went to the store, Alice gave a drink to",
-            "correct_target": " John",
-            "incorrect_target": " Mary"
+            "clean": (
+                "When John and Mary went to the store, "
+                "John gave a book to"
+            ),
+            "corrupted": (
+                "When John and Mary went to the store, "
+                "Mary gave a book to"
+            ),
+            "correct_target": " Mary",
+            "incorrect_target": " John",
         }
     ]
